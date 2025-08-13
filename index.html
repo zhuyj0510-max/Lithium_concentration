@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Arduino MKR1010 Voltage Monitor (12h History)</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/moment"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f4;
+    }
+    #container {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+    #chart-container {
+      flex: 1;
+    }
+    canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+    #clearBtn {
+      padding: 8px 14px;
+      font-size: 14px;
+      margin: 5px;
+      align-self: flex-end;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <button id="clearBtn" onclick="clearHistory()">Clear History</button>
+    <div id="chart-container">
+      <canvas id="voltageChart"></canvas>
+    </div>
+  </div>
+
+  <script>
+    // MQTT connection
+    const broker = 'wss://broker.hivemq.com:8884/mqtt';
+    const topic = 'sensor/potentiometer/Yujie';
+    const client =
