@@ -2,50 +2,67 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Arduino MKR1010 Voltage Monitor (12h History)</title>
+  <title>实时电压监控</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/moment"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      width: 100%;
-      font-family: Arial, sans-serif;
-      background-color: #f4f4f4;
-    }
-    #container {
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-    }
-    #chart-container {
-      flex: 1;
-    }
-    canvas {
-      width: 100% !important;
-      height: 100% !important;
-    }
-    #clearBtn {
-      padding: 8px 14px;
-      font-size: 14px;
-      margin: 5px;
-      align-self: flex-end;
-    }
+    body { font-family: Arial; text-align: center; }
+    canvas { max-width: 800px; margin-top: 20px; }
   </style>
 </head>
 <body>
-  <div id="container">
-    <button id="clearBtn" onclick="clearHistory()">Clear History</button>
-    <div id="chart-container">
-      <canvas id="voltageChart"></canvas>
-    </div>
-  </div>
+  <h2>Arduino MKR1010 实时电压图</h2>
+  <canvas id="voltageChart"></canvas>
 
   <script>
-    // MQTT connection
+    // === MQTT 连接 (WebSocket) ===
     const broker = 'wss://broker.hivemq.com:8884/mqtt';
-    const topic = 'sensor/potentiometer/Yujie';
-    const client =
+    const topic = 'sensor/potentiometer';
+
+    const client = mqtt.connect(broker);
+    client.on('connect', () => {
+      console.log('Connected to MQTT broker');
+      client.subscribe(topic);
+    });
+
+    // === Chart.js 初始化 ===
+    const ctx = document.getElementById('voltageChart').getContext('2d');
+    const voltageData = {
+      labels: [],
+      datasets: [{
+        label: 'Voltage (V)',
+        data: [],
+        borderColor: 'rgb(75, 192, 192)',
+        fill: false,
+        tension: 0.1
+      }]
+    };
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: voltageData,
+      options: {
+        responsive: true,
+        scales: {
+          x: { title: { display: true, text: 'Time' } },
+          y: { min: 0, max: 3.3, title: { display: true, text: 'Voltage (V)' } }
+        }
+      }
+    });
+
+    // === 接收 MQTT 消息并更新图表 ===
+    client.on('message', (topic, message) => {
+      const voltage = parseFloat(message.toString());
+      const now = new Date().toLocaleTimeString();
+
+      voltageData.labels.push(now);
+      voltageData.datasets[0].data.push(voltage);
+
+      if (voltageData.labels.length > 50) { // 保持 50 个数据点
+        voltageData.labels.shift();
+        voltageData.datasets[0].data.shift();
+      }
+      chart.update();
+    });
+  </script>
+</body>
+</html>
