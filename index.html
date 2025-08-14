@@ -7,6 +7,8 @@
   <script src="https://cdn.jsdelivr.net/npm/moment"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <!-- 加入缩放插件 -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
   <style>
     html, body {
       margin: 0;
@@ -28,7 +30,7 @@
     }
     #chart-container {
       width: 100%;
-      height: 800px;
+      height: 600px;
     }
     canvas {
       width: 100% !important;
@@ -47,6 +49,7 @@
     <div>
       <button class="btn" onclick="clearHistory()">Clear History</button>
       <button class="btn" onclick="exportCSV()">Export CSV</button>
+      <button class="btn" onclick="resetZoom()">Reset Zoom</button>
     </div>
     <div id="chart-container">
       <canvas id="voltageChart"></canvas>
@@ -69,13 +72,13 @@
     const voltageData = {
       labels: [],
       datasets: [{
-        label: 'Voltage (V)',
+        label: 'Voltage (mV)',
         data: [],
         borderColor: 'rgb(75, 192, 192)',
         backgroundColor: 'rgba(75, 192, 192, 0.1)',
         fill: true,
         tension: 0.1,
-        spanGaps: false // 断点处不画线
+        spanGaps: false
       }]
     };
 
@@ -96,7 +99,7 @@
             title: { display: true, text: 'Reception Time' }
           },
           y: {
-            min: -100,
+            min: -200,
             max: 500,
             title: { display: true, text: 'Voltage (mV)' }
           }
@@ -105,12 +108,25 @@
           legend: { display: true },
           title: {
             display: true,
-            text: 'Arduino MKR1010 Voltage Monitor',
+            text: 'Lithium concentration calibration tool',
             font: { size: 18 }
+          },
+          zoom: {
+            pan: { enabled: true, mode: 'x' },
+            zoom: {
+              wheel: { enabled: true },
+              drag: { enabled: true, mode: 'x' }, // 鼠标框选放大
+              mode: 'x'
+            }
           }
         }
       }
     });
+
+    // Reset zoom
+    function resetZoom() {
+      chart.resetZoom();
+    }
 
     // Load saved history
     function loadHistory() {
@@ -180,9 +196,7 @@
       const now = new Date();
 
       if (!isNaN(voltage)) {
-        // 检测与上次数据的时间间隔
         if (lastTime && now - lastTime > GAP_THRESHOLD) {
-          // 插入 null 让图表断线
           bufferLabels.push(new Date(lastTime.getTime() + 1000));
           bufferData.push(null);
         }
@@ -196,7 +210,6 @@
         voltageData.labels.push(...bufferLabels);
         voltageData.datasets[0].data.push(...bufferData);
 
-        // 保留最近 1 小时数据
         const cutoff = new Date(now.getTime() - 1 * 60 * 60 * 1000);
         while (voltageData.labels.length && voltageData.labels[0] < cutoff) {
           voltageData.labels.shift();
