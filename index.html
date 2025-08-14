@@ -2,30 +2,69 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>实时电压监控</title>
+  <title>Arduino MKR1010 Voltage Monitor (1h History)</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/moment"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <style>
-    body { font-family: Arial; text-align: center; }
-    canvas { max-width: 800px; margin-top: 20px; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f4;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #container {
+      width: 95%;
+      margin: 10px auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #chart-container {
+      width: 100%;
+      height: 800px;
+    }
+    canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+    .btn {
+      padding: 6px 12px;
+      font-size: 14px;
+      margin: 5px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
-  <h2>Arduino MKR1010 实时电压图</h2>
-  <canvas id="voltageChart"></canvas>
+  <div id="container">
+    <div>
+      <button class="btn" onclick="clearHistory()">Clear History</button>
+      <button class="btn" onclick="exportCSV()">Export CSV</button>
+    </div>
+    <div id="chart-container">
+      <canvas id="voltageChart"></canvas>
+    </div>
+  </div>
 
   <script>
-    // === MQTT 连接 (WebSocket) ===
+    // MQTT connection
     const broker = 'wss://broker.hivemq.com:8884/mqtt';
-    const topic = 'sensor/potentiometer';
-
+    const topic = 'OCP';
     const client = mqtt.connect(broker);
+
     client.on('connect', () => {
       console.log('Connected to MQTT broker');
       client.subscribe(topic);
     });
 
-    // === Chart.js 初始化 ===
+    // Chart.js initialization
     const ctx = document.getElementById('voltageChart').getContext('2d');
     const voltageData = {
       labels: [],
@@ -33,36 +72,146 @@
         label: 'Voltage (V)',
         data: [],
         borderColor: 'rgb(75, 192, 192)',
-        fill: false,
-        tension: 0.1
+        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+        fill: true,
+        tension: 0.1,
+        spanGaps: false // 断点处不画线
       }]
     };
+
     const chart = new Chart(ctx, {
       type: 'line',
       data: voltageData,
       options: {
         responsive: true,
+        maintainAspectRatio: false,
         scales: {
-          x: { title: { display: true, text: 'Time' } },
-          y: { min: 0, max: 3.3, title: { display: true, text: 'Voltage (V)' } }
+          x: {
+            type: 'time',
+            time: {
+              tooltipFormat: 'HH:mm:ss',
+              unit: 'second',
+              displayFormats: { second: 'HH:mm:ss' }
+            },
+            title: { display: true, text: 'Reception Time' }
+          },
+          y: {
+            min: -100,
+            max: 500,
+            title: { display: true, text: 'Voltage (mV)' }
+          }
+        },
+        plugins: {
+          legend: { display: true },
+          title: {
+            display: true,
+            text: 'Arduino MKR1010 Voltage Monitor',
+            font: { size: 18 }
+          }
         }
       }
     });
 
-    // === 接收 MQTT 消息并更新图表 ===
+    // Load saved history
+    function loadHistory() {
+      const saved = localStorage.getItem('voltageHistory');
+      if (saved) {
+        try {
+          const history = JSON.parse(saved);
+          voltageData.labels = history.labels.map(t => new Date(t));
+          voltageData.datasets[0].data = history.data.map(v => v === null ? null : v);
+          chart.update();
+        } catch (e) {
+          console.error('Failed to parse history data', e);
+        }
+      }
+    }
+
+    // Save history
+    function saveHistory() {
+      const history = {
+        labels: voltageData.labels.map(t => t.toISOString()),
+        data: voltageData.datasets[0].data
+      };
+      localStorage.setItem('voltageHistory', JSON.stringify(history));
+    }
+
+    // Clear history
+    function clearHistory() {
+      localStorage.removeItem('voltageHistory');
+      voltageData.labels = [];
+      voltageData.datasets[0].data = [];
+      chart.update();
+      alert('History cleared');
+    }
+
+    // Export CSV
+    function exportCSV() {
+      const data = localStorage.getItem('voltageHistory');
+      if (!data) return alert('No data to export');
+
+      const history = JSON.parse(data);
+      const labels = history.labels;
+      const values = history.data;
+
+      let csvContent = "Time,Voltage(V)\n";
+      for (let i = 0; i < labels.length; i++) {
+        csvContent += `${labels[i]},${values[i] !== null ? values[i] : ''}\n`;
+      }
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'voltageHistory.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // Batch update to improve performance
+    let bufferLabels = [];
+    let bufferData = [];
+    const BATCH_SIZE = 5;
+    let lastTime = null;
+    const GAP_THRESHOLD = 2000; // 2秒无数据则断开
+
     client.on('message', (topic, message) => {
       const voltage = parseFloat(message.toString());
-      const now = new Date().toLocaleTimeString();
+      const now = new Date();
 
-      voltageData.labels.push(now);
-      voltageData.datasets[0].data.push(voltage);
+      if (!isNaN(voltage)) {
+        // 检测与上次数据的时间间隔
+        if (lastTime && now - lastTime > GAP_THRESHOLD) {
+          // 插入 null 让图表断线
+          bufferLabels.push(new Date(lastTime.getTime() + 1000));
+          bufferData.push(null);
+        }
+        lastTime = now;
 
-      if (voltageData.labels.length > 50) { // 保持 50 个数据点
-        voltageData.labels.shift();
-        voltageData.datasets[0].data.shift();
+        bufferLabels.push(now);
+        bufferData.push(voltage);
       }
-      chart.update();
+
+      if (bufferLabels.length >= BATCH_SIZE) {
+        voltageData.labels.push(...bufferLabels);
+        voltageData.datasets[0].data.push(...bufferData);
+
+        // 保留最近 1 小时数据
+        const cutoff = new Date(now.getTime() - 1 * 60 * 60 * 1000);
+        while (voltageData.labels.length && voltageData.labels[0] < cutoff) {
+          voltageData.labels.shift();
+          voltageData.datasets[0].data.shift();
+        }
+
+        chart.update();
+        saveHistory();
+
+        bufferLabels = [];
+        bufferData = [];
+      }
     });
+
+    loadHistory();
   </script>
 </body>
 </html>
